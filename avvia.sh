@@ -3,6 +3,12 @@
 # BE in background, FE in primo piano: Ctrl+C chiude entrambi.
 cd "$(dirname "$0")" || exit 1
 
+# ---------- Segreti: senza be/.env il backend non parte (JWT_SECRET, ADMIN_PASSWORD, MAIL_*) ----------
+if [ ! -f be/.env ]; then
+  echo "[BE] manca be/.env: copia be/.env.example in be/.env e compila i valori."
+  exit 1
+fi
+
 # ---------- PostgreSQL: serve il database salone_auto sulla 5432 ----------
 if nc -z localhost 5432 >/dev/null 2>&1; then
   echo "[postgres] in ascolto sulla 5432."

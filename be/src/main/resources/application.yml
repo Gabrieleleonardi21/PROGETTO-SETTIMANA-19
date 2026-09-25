@@ -41,6 +41,13 @@ spring:
           timeout: 5000
           writetimeout: 5000
 
+  # Allo spegnimento (es. redeploy su Render) si aspetta che le mail in corso finiscano
+  task:
+    execution:
+      shutdown:
+        await-termination: true
+        await-termination-period: 30s
+
   data:
     web:
       pageable:
@@ -51,8 +58,15 @@ server:
   # Render assegna la porta in PORT.
   port: ${PORT:8080}
   shutdown: graceful
+  # Dietro il proxy https di Render: Spring riconosce le richieste come sicure (HSTS compreso)
+  forward-headers-strategy: framework
 
 management:
+  # L'health e' pubblico: senza questa riga ogni chiamata farebbe un login SMTP su Gmail,
+  # e un abuso potrebbe far bloccare l'account che manda gli avvisi
+  health:
+    mail:
+      enabled: false
   endpoints:
     web:
       exposure:
@@ -70,9 +84,14 @@ app:
     # HS256: almeno 32 caratteri. Nessun default, senza JWT_SECRET l'app non parte.
     secret: ${JWT_SECRET}
     expiration-minutes: ${JWT_EXPIRATION_MINUTES:120}
+  auth:
+    # Tentativi di login/registrazione al minuto per IP, poi 429 (freno agli attacchi a dizionario)
+    tentativi-al-minuto: ${AUTH_TENTATIVI_AL_MINUTO:10}
   admin:
     # L'amministratore viene creato al primo avvio con queste credenziali.
     email: ${ADMIN_EMAIL:admin@salone.it}
     password: ${ADMIN_PASSWORD}
+  # Al primo avvio, con il catalogo vuoto, importa auto di esempio da Wikipedia e DummyJSON
+  importa-auto-esempio: ${IMPORTA_AUTO_ESEMPIO:true}
   # Indirizzo del frontend, usato per il link "disattiva avviso" nella mail.
   frontend-url: ${FRONTEND_URL:http://localhost:5173}

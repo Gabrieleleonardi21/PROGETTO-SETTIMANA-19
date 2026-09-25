@@ -38,6 +38,18 @@ public interface AvvisoRepository extends JpaRepository<Avviso, UUID> {
     List<UUID> daInviare(UUID autoId, BigDecimal vecchio, BigDecimal nuovo);
 
     /**
+     * Auto appena ripubblicata: ogni avviso non inviato con soglia >= prezzo ha mancato l'attraversamento
+     * mentre l'auto era in bozza (alla creazione la soglia e' sempre sotto il prezzo).
+     */
+    @Query("""
+            SELECT a.id FROM Avviso a
+            WHERE a.auto.id = :autoId
+              AND a.inviato = false
+              AND a.soglia >= :nuovo
+            """)
+    List<UUID> daInviareAllaPubblicazione(UUID autoId, BigDecimal nuovo);
+
+    /**
      * Prende il segno "inviato" in un colpo solo. Restituisce 1 solo al primo che ci arriva:
      * se due cambi di prezzo ravvicinati scattano insieme, il secondo trova inviato = true e ottiene 0.
      * Nello stesso UPDATE si salva l'hash del token per il link "disattiva".

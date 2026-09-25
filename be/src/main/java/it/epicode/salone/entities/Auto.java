@@ -6,7 +6,11 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.math.BigDecimal;
+import org.hibernate.annotations.BatchSize;
+
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -58,4 +62,20 @@ public class Auto {
     // Due modifiche contemporanee alla stessa auto: la seconda riceve 409 invece di sovrascrivere
     @Version
     private long versione;
+
+    // URL delle foto, nell'ordine della galleria. Solo host ammessi (vedi ImmaginiAuto).
+    // BatchSize: nel catalogo le foto di tutte le auto della pagina arrivano con poche query invece di una per auto
+    @ElementCollection
+    @CollectionTable(name = "auto_immagini", joinColumns = @JoinColumn(name = "auto_id"))
+    @OrderColumn(name = "posizione")
+    @Column(name = "url", nullable = false, length = 500)
+    @BatchSize(size = 50)
+    private List<String> immagini = new ArrayList<>();
+
+    // Crediti delle foto (licenza) e pagina da cui provengono, mostrati sotto la galleria
+    @Column(length = 200)
+    private String creditiFoto;
+
+    @Column(length = 500)
+    private String fonteFoto;
 }

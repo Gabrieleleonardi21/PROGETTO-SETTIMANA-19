@@ -1,25 +1,25 @@
 # Blueprint Render: database + backend + frontend.
 # Su Render: New > Blueprint > repository > Apply.
-# Rinominare app-db / app-be / app-fe con il nome del progetto.
 
 databases:
-  - name: app-db
-    databaseName: app
-    user: app
+  - name: salone-db
+    databaseName: salone
+    user: salone
     plan: free
     region: frankfurt
 
 services:
   # ---------- Backend: Spring Boot via Docker ----------
   - type: web
-    name: app-be
+    name: salone-be
     runtime: docker
     plan: free
     region: frankfurt
     rootDir: be
     # dockerfilePath parte da rootDir; buildFilter dalla radice della repo.
     dockerfilePath: ./Dockerfile
-    healthCheckPath: /actuator/health
+    # liveness: dice solo se il processo e' vivo, non dipende da servizi esterni
+    healthCheckPath: /actuator/health/liveness
     buildFilter:
       paths:
         - be/**
@@ -27,15 +27,31 @@ services:
     envVars:
       - key: DATABASE_URL
         fromDatabase:
-          name: app-db
+          name: salone-db
           property: connectionString
-      # Origine del FE per il CORS, es. https://app-fe.onrender.com
+      # Origine del FE per il CORS, es. https://salone-fe.onrender.com
       - key: ALLOWED_ORIGIN
+        sync: false
+      # Indirizzo del FE per il link "disattiva avviso" nelle mail (senza / finale)
+      - key: FRONTEND_URL
+        sync: false
+      # Segreti: si scrivono solo nel pannello di Render, mai nella repo
+      - key: JWT_SECRET
+        generateValue: true
+      # Email e password (almeno 12 caratteri) dell'amministratore creato al primo avvio
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: MAIL_USERNAME
+        sync: false
+      # Password per le app di Gmail (16 caratteri), non quella dell'account
+      - key: MAIL_PASSWORD
         sync: false
 
   # ---------- Frontend: build Vite statica ----------
   - type: web
-    name: app-fe
+    name: salone-fe
     runtime: static
     rootDir: fe
     buildCommand: npm ci && npm run build
@@ -45,9 +61,23 @@ services:
         - fe/**
         - render.yaml
     envVars:
-      # Indirizzo del BE, es. https://app-be.onrender.com (senza / finale)
+      # Indirizzo del BE, es. https://salone-be.onrender.com (senza / finale)
       - key: VITE_API_URL
         sync: false
+    # Header di sicurezza del sito statico. La CSP limita da dove partono script e fetch: e' la difesa
+    # principale del token nel localStorage se un giorno comparisse un XSS. Le foto delle auto arrivano solo
+    # da Wikimedia e DummyJSON, gli stessi host ammessi dal backend (ImmaginiAuto). no-referrer: il token del
+    # link "disattiva avviso" non esce dalla pagina.
+    headers:
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://upload.wikimedia.org https://cdn.dummyjson.com; font-src 'self' data:; connect-src 'self' https://*.onrender.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
     routes:
       - type: rewrite
         source: /*

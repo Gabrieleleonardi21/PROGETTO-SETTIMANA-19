@@ -1,0 +1,269 @@
+RELAZIONE - CONSEGNA D5: MINI SALONE DI AUTOMOBILI
+====================================================
+
+Autore: Gabriele Leonardi
+Stack: Spring Boot 4.1.1 (Java 25) + PostgreSQL, React 19 + Vite (JSX), deploy su Render.
+
+
+1. COSA FA L'APPLICAZIONE
+-------------------------
+
+- Visitatore (senza accesso): sfoglia le auto pubblicate, cerca per marca/modello, filtra
+  per prezzo e ordina (prezzo, anno, km, marca, piu' recenti).
+- Utente registrato: aggiunge auto ai preferiti e su ognuna fissa una soglia di prezzo.
+  Dal profilo cambia il nome o elimina l'account.
+- Amministratore: vede tutte le auto, anche le bozze, con il prezzo d'acquisto; crea e
+  modifica le auto e ne cambia il prezzo.
+- Quando il prezzo di un'auto scende sotto la soglia di un utente, a quell'utente arriva
+  UNA mail, con un link per disattivare l'avviso.
+
+Entita': Utente, Auto, Preferito, Avviso.
+Un Avviso lega un utente a un'auto e contiene la soglia, il segno "inviato" e l'hash del
+token del link di disattivazione. Un utente ha al massimo un avviso e un preferito per auto
+(vincolo unique su utente + auto).
+
+
+2. QUANDO PARTE UNA MAIL (slide "Gli avvisi di prezzo")
+-------------------------------------------------------
+
+Regola: l'avviso scatta quando il prezzo ATTRAVERSA la soglia, cioe'
+    prima il prezzo era sopra la soglia   (soglia <  prezzo vecchio)
+    adesso e' uguale o sotto              (soglia >= prezzo nuovo)
+
+E' esattamente la WHERE di AvvisoRepository.daInviare:
+    inviato = false AND soglia < :vecchio AND soglia >= :nuovo
+
+Di conseguenza:
+- l'admin salva di nuovo lo stesso prezzo      -> vecchio = nuovo, nessun avviso passa
+- l'admin abbassa ancora un prezzo gia' sotto   -> soglia < vecchio e' falso, niente
+- il prezzo risale e poi riscende               -> l'avviso ha gia' inviato = true, niente
+
+Il segno "inviato" non torna mai a false: ogni avviso manda al massimo una mail nella sua
+vita. Se l'utente vuole un nuovo avviso lo elimina e ne crea un altro.
+
+Alla creazione la soglia deve essere SOTTO il prezzo attuale (altrimenti 400): un avviso
+con soglia gia' raggiunta non potrebbe mai "attraversarla".
+
+Caso particolare, auto rimessa in bozza: se l'admin abbassa il prezzo mentre l'auto e' in
+bozza nessuno viene avvisato (gli utenti non la vedono). Quando la ripubblica, AutoService
+pubblica un evento senza prezzo vecchio e il listener prende tutti gli avvisi non inviati
+con soglia >= prezzo attuale: visto che alla creazione la soglia era sotto il prezzo, se
+adesso e' raggiunta l'attraversamento e' avvenuto mentre l'auto era nascosta.
+
+
+3. LA MAIL: DOPO IL SALVATAGGIO E UNA SOLA VOLTA (slide "La mail")
+-----------------------------------------------------------------
+
+Flusso:
+1. AutoService.aggiornaPrezzo (unico punto in cui cambia il prezzo, usato sia dal PATCH
+   /prezzo sia dal PUT di modifica) salva il nuovo prezzo e, se l'auto e' pubblicata e il
+   prezzo e' sceso, pubblica PrezzoCambiatoEvent(autoId, vecchio, nuovo).
+2. AvvisoListener lo ascolta con
+       @Async
+       @TransactionalEventListener(phase = AFTER_COMMIT)
+   - AFTER_COMMIT: il listener parte solo se la transazione del cambio prezzo e' andata a
+     buon fine. Se il salvataggio fallisce (validazione, conflitto @Version, DB giu') non
+     parte nulla: nessuna mail per un prezzo che non esiste.
+   - @Async: gira in un altro thread. L'admin riceve la risposta subito (misurato: 11 ms)
+     e non aspetta Gmail.
+3. Per ogni avviso candidato si prende il segno in un colpo solo:
+       UPDATE Avviso SET inviato = true, tokenDisattivaHash = :hash
+       WHERE id = :id AND inviato = false
+   e si spedisce SOLO se la riga aggiornata e' una.
+
+Perche' serve l'UPDATE atomico: due modifiche ravvicinate (es. 12000 -> 9500 e subito
+9500 -> 9000, oppure due admin) producono due eventi e due thread. Entrambi potrebbero
+leggere "inviato = false". Con l'UPDATE condizionato il database serializza le due
+scritture: il primo ottiene 1 e spedisce, il secondo trova gia' inviato = true, ottiene 0
+e non spedisce. Provato con due PATCH lanciati in parallelo: una sola mail.
+
+Ogni avviso e' elaborato nel suo try/catch: un errore su uno (es. DB momentaneamente giu')
+non impedisce l'invio agli altri. Allo spegnimento del server (redeploy su Render) Spring
+aspetta fino a 30 secondi che i task in corso finiscano (await-termination).
+
+
+4. SE GMAIL NON RISPONDE: SCELTA DEL PROGETTO
+---------------------------------------------
+
+Scelta: l'avviso RESTA INVIATO e la mail e' persa.
+
+Motivazione:
+- La consegna dice "ogni avviso manda una sola mail". Tra "a volte nessuna mail" e "a
+  volte due mail" la prima rispetta la regola, la seconda no.
+- Il doppione e' il rischio reale dell'alternativa: se Gmail accetta il messaggio ma la
+  risposta si perde (timeout), il server crede che l'invio sia fallito. Rimettendo
+  inviato = false, al prossimo ribasso partirebbe una seconda mail per lo stesso avviso.
+- Una mail di avviso prezzo persa non fa danni: l'utente vede comunque il prezzo nuovo
+  nel catalogo e nella pagina "Avvisi" (colonna prezzo attuale).
+- E' la soluzione piu' semplice: nessuna coda di ritentativi da gestire.
+
+In pratica EmailService cattura l'eccezione, scrive nel log
+    "Invio mail avviso <id> fallito (MailSendException): l'avviso resta inviato"
+(solo l'id e il tipo di errore, niente indirizzo) e non rilancia.
+I timeout SMTP sono di 5 secondi, cosi' un Gmail lento non tiene occupato il thread.
+
+Provato spegnendo l'SMTP: nessun errore per l'admin, avviso inviato = true, riga nel log.
+
+
+5. ATTACCHI: I DATI IN INGRESSO (slide 5)
+-----------------------------------------
+
+Ricerca e ordinamento
+- I filtri diventano una Specification JPA (Criteria API): marca/modello e prezzo sono
+  PARAMETRI, nessuna stringa SQL concatenata.
+- Nel LIKE i caratteri % e _ scritti dall'utente vengono resi letterali (SearchUtils).
+- Il campo di ordinamento arriva dal client e non si puo' legare come parametro: si
+  confronta con un ELENCO CHIUSO (AutoService.ORDINAMENTI: prezzo, anno, km, marca,
+  recenti). Qualsiasi altro valore, es. sort=prezzoAcquisto, risponde 400.
+- Dimensione pagina massima 50.
+- Parametri malformati (prezzoMin=abc) -> 400 "Valore non valido", senza dettagli interni.
+
+Testo mostrato nella pagina e nella mail
+- La descrizione dell'auto e' resa da React come testo ({auto.descrizione}); nel progetto
+  non esistono dangerouslySetInnerHTML ne' innerHTML. Provato con la descrizione
+  <img src=x onerror=alert(1)>: compare come testo.
+- Il nome dell'utente finisce nella mail tramite il template Thymeleaf
+  templates/email/avviso-prezzo.html, che usa solo th:text e th:href (escape automatico,
+  mai th:utext). Provato con il nome <b>Mario</b>: nella mail arriva &lt;b&gt;Mario&lt;/b&gt;.
+
+DTO e mai entita'
+- Registrazione (RegistrazioneRequest: nome, email, password), profilo (ProfiloRequest:
+  solo nome), avvisi (AvvisoRequest: autoId, soglia), preferiti (PreferitoRequest: autoId).
+- Campi in piu' nel JSON vengono ignorati. Provato: registrazione con "ruolo":"ADMIN" ->
+  l'utente e' USER; avviso con "inviato":true e "utenteId" -> ignorati, inviato = false.
+- L'utente proprietario arriva sempre dal token (subject del JWT), mai dal body.
+
+
+6. ATTACCHI: CHI PUO' FARE COSA (slide 6)
+-----------------------------------------
+
+- Cambiare prezzo e gestire auto spetta all'admin. Doppio controllo: regola sulla URL
+  /api/admin/** in SecurityConfig e @PreAuthorize("hasRole('ADMIN')") sul controller.
+  Utente collegato -> 403, anonimo -> 401.
+- Il ruolo lo decide il server: la registrazione crea sempre USER; l'unico ADMIN nasce
+  all'avvio da ADMIN_EMAIL / ADMIN_PASSWORD (almeno 12 caratteri, altrimenti l'app non
+  parte).
+- Nel JWT solo il necessario: sub (id utente), ruolo, iat, exp. Niente email ne' nome.
+  Firma HS256 con JWT_SECRET di almeno 32 caratteri.
+- Avvisi e preferiti si cercano per id E proprietario (findByIdAndUtenteId). Chi prova
+  l'id di un altro utente riceve 404: non sa nemmeno che esiste.
+- Il catalogo pubblico non contiene il prezzo d'acquisto (AutoPubblicaResponse) e una
+  bozza risponde 404. Se un'auto con avviso torna in bozza, /api/avvisi non mostra piu'
+  marca, modello e prezzo (disponibile = false), ma l'utente puo' eliminare l'avviso.
+- Link "disattiva avviso" nella mail: token di 32 byte da SecureRandom (base64url), non
+  l'id. Nel DB c'e' solo lo SHA-256 del token. E' monouso: l'uso elimina l'avviso e con lui
+  l'hash (secondo uso -> 404). La pagina del frontend lo invia con un POST solo quando
+  l'utente preme il pulsante: i client di posta aprono i link in anteprima e un GET
+  consumerebbe il token da solo. Il frontend su Render ha Referrer-Policy: no-referrer, cosi'
+  il token nell'indirizzo non esce verso altri siti.
+- Log: solo id e conteggi. Mai password, email o token.
+- Segreti: JWT_SECRET, ADMIN_PASSWORD, MAIL_USERNAME, MAIL_PASSWORD non hanno valori di
+  ripiego in application.yml; senza di loro l'app non parte. In locale stanno in be/.env,
+  ignorato da git e da docker. La password di Gmail e' una "password per le app".
+- Login: stesso messaggio e stesso tempo (BCrypt eseguito anche per email sconosciute) per
+  email inesistente o password sbagliata.
+- Attacchi a dizionario: login e registrazione accettano al massimo 10 richieste al minuto
+  per IP (LimiteAuthFilter), poi rispondono 429 con Retry-After. L'IP e' quello vero del
+  client anche dietro il proxy di Render. Provato: dal 10° tentativo sbagliato in un minuto
+  arriva 429, anche con la password giusta; il catalogo non e' limitato.
+- Due admin sulla stessa auto: ogni modifica e cambio prezzo manda la versione dell'auto
+  vista all'apertura del form. Se nel frattempo un altro admin ha salvato, la risposta e'
+  409 e la pagina si ricarica: nessuno cancella la modifica dell'altro senza accorgersene
+  (es. un ribasso che ha appena fatto partire le mail). Provato: form vecchio -> 409, il
+  prezzo resta quello dell'altro admin.
+
+
+7. PRIVACY E COOKIE (slide 7)
+-----------------------------
+
+Pagine /privacy e /cookie, raggiungibili dal footer di ogni pagina, scritte per questa
+applicazione:
+- Privacy Policy: dati raccolti (email, nome, hash della password, preferiti, soglie),
+  a cosa servono, chi li riceve (Render, Gmail solo per l'avviso), per quanto tempo (fino
+  all'eliminazione dell'account), diritti e come esercitarli.
+- Cookie Policy: nel browser resta solo la chiave salone.sessione nel localStorage, con
+  token e scadenza (nessun dato personale oltre all'id nel token). Nessun cookie di terze
+  parti o di statistica, quindi nessun banner.
+- Nessun dato salvato che non serva: niente telefono, indirizzo, statistiche.
+- "Elimina il mio account" (profilo) cancella nella stessa transazione avvisi, preferiti e
+  utente: da li' non parte piu' nessuna mail. Provato: dopo l'eliminazione il vecchio token
+  riceve 401.
+
+Perche' il token e' nel localStorage e non in un cookie HttpOnly: su Render frontend e
+backend stanno su due domini diversi (salone-fe / salone-be.onrender.com) e un cookie
+SameSite non verrebbe inviato. Il rischio del localStorage e' un XSS: per questo non c'e'
+HTML dinamico nell'app e il sito statico ha una Content-Security-Policy che permette script
+solo dallo stesso dominio.
+
+
+8. DEPLOY SU RENDER (slide 8)
+-----------------------------
+
+Stesso percorso dei giorni scorsi: render.yaml (Blueprint), be/Dockerfile, DatabaseUrl.java.
+- Health check su /actuator/health/liveness, pubblico. Il controllo della mail nell'health
+  e' spento: altrimenti ogni chiamata anonima farebbe un login su Gmail e un abuso potrebbe
+  far bloccare l'account.
+- ALLOWED_ORIGIN contiene l'indirizzo esatto del frontend; ogni fetch passa da api.js.
+- Variabili del backend: JWT_SECRET (generata da Render), ADMIN_EMAIL, ADMIN_PASSWORD,
+  MAIL_USERNAME, MAIL_PASSWORD, FRONTEND_URL (per il link nella mail), ALLOWED_ORIGIN.
+- Variabile del frontend: VITE_API_URL (letta in fase di build).
+
+
+9. COME L'HO VERIFICATO
+-----------------------
+
+Backend avviato in locale con un server SMTP finto che salva le mail su file. Prove:
+- soglia 10000, auto a 12000: 11000 -> 0 mail; 9500 -> 1 mail; di nuovo 9500, poi 9000,
+  poi 12000 e di nuovo 9000 -> sempre 1 mail in totale;
+- due ribassi in parallelo su un nuovo avviso -> 1 mail;
+- ribasso in bozza -> 0 mail; ripubblicazione -> 1 mail;
+- SMTP spento -> avviso inviato, mail persa, admin risponde subito;
+- registrazione con ruolo ADMIN -> USER; utente su /api/admin -> 403; avviso altrui -> 404;
+  sort=prezzoAcquisto -> 400; bozza pubblica -> 404; link della mail -> 204, poi 404.
+
+
+9-bis. FOTO E CATALOGO DI ESEMPIO
+---------------------------------
+
+Al primo avvio, con il catalogo vuoto, CatalogoEsempio importa auto di esempio in un thread separato
+(l'app risponde subito e parte anche senza internet):
+- 18 modelli europei con dati inventati e la foto principale presa dall'API di Wikipedia
+  (immagini di Wikimedia Commons: autore e licenza di ogni foto compaiono sotto la foto);
+- le 5 auto dell'API DummyJSON con la loro galleria di 6 foto.
+
+Sicurezza delle foto: gli URL sono accettati solo in https e solo da upload.wikimedia.org e
+cdn.dummyjson.com (ImmaginiAuto, lato server, anche per l'admin). La Content-Security-Policy del
+frontend ammette immagini solo da quegli stessi host. Le foto si caricano con referrerPolicy
+no-referrer; la Privacy Policy spiega che quei server vedono l'IP di chi guarda il catalogo.
+
+
+9-ter. FONTI
+------------
+
+Tutte le fonti sono elencate anche nell'app, pagina "Crediti e fonti" (footer), e nel README.
+
+- Template di partenza: HELP/Deploy-Base-JSX dalla repository del docente
+  https://github.com/MatteoPattavinaDocente/JavaAIUnit5
+- Foto: Wikimedia Commons (https://commons.wikimedia.org), cercate con l'API di Wikipedia.
+  Le licenze (CC BY-SA 3.0, CC BY-SA 4.0, GFDL) chiedono di citare autore, licenza e fonte:
+  l'importatore li legge per ogni file dall'API di Commons e l'app li mostra sotto la foto
+  ("Foto: Vauxford, CC BY-SA 4.0, via Wikimedia Commons") con il link alla pagina del file.
+  Le richieste sono due in tutto (API a lotti), per rispettare i limiti di Wikimedia.
+- Auto con galleria: DummyJSON (https://dummyjson.com), API di dati fittizi.
+- Dati delle auto: marche e modelli reali; anno, km, prezzi e descrizioni inventati.
+- Componenti adattati da 21st.dev: "Animated Theme Toggle" di johuniq e "Product Card" di
+  ravikatiyar162. Componenti UI di shadcn/ui; alcune parti riprese dal progetto U5D13 del corso.
+
+
+10. LIMITI NOTI
+---------------
+
+- Il limite ai tentativi e' in memoria: vale per un'istanza sola (come il piano free di
+  Render). Con piu' istanze servirebbe un contatore condiviso (es. Redis / Bucket4j).
+- La registrazione risponde 409 se l'email esiste gia': rivela che quell'email e'
+  registrata. Si eviterebbe con una conferma via mail.
+- L'evento del cambio prezzo vive in memoria: se il server si spegne di colpo (crash) prima
+  di elaborarlo, quegli avvisi non vengono mandati. La soluzione completa e' una tabella
+  "outbox"; qui e' accettato, coerente con la scelta "meglio una mail persa che doppia".
+- Lo schema del DB e' gestito da Hibernate (ddl-auto: update); in produzione sarebbe meglio
+  Flyway con script di migrazione.

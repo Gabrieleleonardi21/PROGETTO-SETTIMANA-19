@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="it" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Avviso di prezzo</title>
+</head>
+<!-- Solo th:text e th:href: Thymeleaf fa l'escape di ogni valore, nessun th:utext -->
+<body style="font-family: Arial, sans-serif; color: #1e293b; max-width: 560px; margin: 0 auto; padding: 24px;">
+    <h2 style="margin-top: 0;">Buone notizie!</h2>
+    <p>Ciao <span th:text="${nome}">utente</span>,</p>
+    <p>
+        il prezzo di <strong th:text="${auto}">auto</strong> è sceso a
+        <strong th:text="${#numbers.formatDecimal(prezzo, 1, 'POINT', 2, 'COMMA')} + ' €'">0 €</strong>,
+        sotto la tua soglia di
+        <span th:text="${#numbers.formatDecimal(soglia, 1, 'POINT', 2, 'COMMA')} + ' €'">0 €</span>.
+    </p>
+    <p>Questa è l'unica mail che riceverai per questo avviso.</p>
+    <p style="font-size: 13px; color: #64748b;">
+        Non ti interessa più? <a th:href="${link}">Disattiva l'avviso</a>.
+    </p>
+</body>
+</html>

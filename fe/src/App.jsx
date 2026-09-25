@@ -1,44 +1,106 @@
-import { useEffect, useState } from 'react'
-import { api } from '@/lib/api'
+import { lazy } from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MotionConfig } from 'motion/react'
+import { ThemeProvider } from 'next-themes'
+import { createBrowserRouter, RouterProvider } from 'react-router'
+import { AppLayout } from '@/components/AppLayout'
+import { AuthProvider } from '@/components/AuthProvider'
+import { ErrorPage, NotFoundPage } from '@/components/ErrorPage'
+import { RequireAuth } from '@/components/RequireAuth'
+import { ApiError } from '@/lib/api'
+// Il catalogo è la home: arriva subito, insieme al resto del bundle iniziale
+import { CatalogoPage } from '@/features/catalogo/CatalogoPage'
 
-export default function App() {
-  const [stato, setStato] = useState(null)
-  const [errore, setErrore] = useState(null)
+/**
+ * Lazy loading delle pagine: ognuna diventa un file JS separato, scaricato solo quando ci si entra.
+ * lazy() vuole un export default, le pagine hanno export con nome: questo helper fa da ponte.
+ * Il caricamento lo mostra il <Suspense> di AppLayout (skeleton al posto della pagina).
+ */
+function pagina(carica, nome) {
+  return lazy(() => carica().then((modulo) => ({ default: modulo[nome] })))
+}
 
-  useEffect(() => {
-    api
-      .stato()
-      .then(setStato)
-      .catch((e) => setErrore(e instanceof Error ? e.message : String(e)))
-  }, [])
+const DettaglioAutoPage = pagina(() => import('@/features/catalogo/DettaglioAutoPage'), 'DettaglioAutoPage')
+const LoginPage = pagina(() => import('@/features/auth/LoginPage'), 'LoginPage')
+const RegisterPage = pagina(() => import('@/features/auth/RegisterPage'), 'RegisterPage')
+const PreferitiPage = pagina(() => import('@/features/preferiti/PreferitiPage'), 'PreferitiPage')
+const AvvisiPage = pagina(() => import('@/features/avvisi/AvvisiPage'), 'AvvisiPage')
+const DisattivaAvvisoPage = pagina(() => import('@/features/avvisi/DisattivaAvvisoPage'), 'DisattivaAvvisoPage')
+const ProfiloPage = pagina(() => import('@/features/profilo/ProfiloPage'), 'ProfiloPage')
+const PrivacyPage = pagina(() => import('@/features/legale/PrivacyPage'), 'PrivacyPage')
+const CookiePage = pagina(() => import('@/features/legale/CookiePage'), 'CookiePage')
+const CreditiPage = pagina(() => import('@/features/legale/CreditiPage'), 'CreditiPage')
+// La gestione auto la scarica solo l'amministratore (ha già l'export default)
+const AdminAutoPage = lazy(() => import('@/features/admin/AdminAutoPage'))
 
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      // Si riprova solo per errori di rete o 5xx: un 4xx non cambia riprovando
+      retry: (tentativi, err) => {
+        if (!(err instanceof ApiError)) return tentativi < 2
+        return err.status >= 500 && tentativi < 2
+      },
+    },
+  },
+})
+
+const router = createBrowserRouter([
+  {
+    element: <AppLayout />,
+    errorElement: <ErrorPage />,
+    children: [
+      { index: true, element: <CatalogoPage /> },
+      { path: 'auto/:id', element: <DettaglioAutoPage /> },
+      { path: 'accedi', element: <LoginPage /> },
+      { path: 'registrati', element: <RegisterPage /> },
+      { path: 'privacy', element: <PrivacyPage /> },
+      { path: 'cookie', element: <CookiePage /> },
+      { path: 'crediti', element: <CreditiPage /> },
+      { path: 'avvisi/disattiva', element: <DisattivaAvvisoPage /> },
+      {
+        element: <RequireAuth />,
+        children: [
+          { path: 'preferiti', element: <PreferitiPage /> },
+          { path: 'avvisi', element: <AvvisiPage /> },
+          { path: 'profilo', element: <ProfiloPage /> },
+        ],
+      },
+      {
+        path: 'admin',
+        element: <RequireAuth admin />,
+        children: [{ path: 'auto', element: <AdminAutoPage /> }],
+      },
+      { path: '*', element: <NotFoundPage /> },
+    ],
+  },
+])
+
+function App() {
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="mx-auto max-w-2xl px-4 py-10">
-        <h1 className="text-3xl font-semibold tracking-tight">Salone auto</h1>
-        <p className="mt-1 text-sm text-slate-600">React + JavaScript, Spring Boot, PostgreSQL.</p>
-
-        <section className="mt-8 rounded-lg border border-slate-200 bg-white p-4 text-sm">
-          <div className="flex justify-between gap-4">
-            <span className="text-slate-500">API</span>
-            <code className="truncate font-mono text-xs">{api.indirizzo}</code>
-          </div>
-          <div className="mt-2 flex justify-between gap-4">
-            <span className="text-slate-500">Database</span>
-            <span className="font-mono text-xs">{stato ? stato.database : '...'}</span>
-          </div>
-          <div className="mt-2 flex justify-between gap-4">
-            <span className="text-slate-500">Ora del server</span>
-            <span className="font-mono text-xs">{stato ? stato.ora : '...'}</span>
-          </div>
-        </section>
-
-        {errore && (
-          <p className="mt-6 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            {errore}
-          </p>
-        )}
-      </div>
-    </div>
+    // Tema: classe "dark" su <html>, scelta salvata in "salone.tema", di default quello del sistema.
+    // La chiave è la stessa letta da public/tema-iniziale.js prima del primo disegno: è quel file a evitare
+    // lo sfarfallio, perché lo script inline di next-themes in un'app solo client non verrebbe mai eseguito.
+    // type application/json lo rende un dato inerte, così React non segnala un <script> nel render.
+    <ThemeProvider
+      attribute="class"
+      defaultTheme="system"
+      enableSystem
+      storageKey="salone.tema"
+      disableTransitionOnChange
+      scriptProps={{ type: 'application/json' }}
+    >
+      {/* reducedMotion="user": chi ha "riduci movimento" nel sistema non vede le animazioni */}
+      <MotionConfig reducedMotion="user">
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <RouterProvider router={router} />
+          </AuthProvider>
+        </QueryClientProvider>
+      </MotionConfig>
+    </ThemeProvider>
   )
 }
+
+export default App

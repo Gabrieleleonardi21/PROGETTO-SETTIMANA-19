@@ -3,6 +3,13 @@ setlocal
 title Salone auto (locale)
 cd /d "%~dp0"
 
+rem ---------- Segreti: senza be\.env il backend non parte ----------
+if not exist "be\.env" (
+  echo [BE] manca be\.env: copia be\.env.example in be\.env e compila i valori.
+  pause
+  exit /b 1
+)
+
 rem ---------- PostgreSQL: serve il database salone_auto sulla 5432 ----------
 powershell -NoProfile -Command "$c=New-Object Net.Sockets.TcpClient; try { $c.Connect('localhost',5432); exit 0 } catch { exit 1 }" >nul 2>&1
 if errorlevel 1 (
