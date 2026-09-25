@@ -59,18 +59,18 @@ Modifica e cambio prezzo richiedono la `versione` dell'auto letta prima: se nel 
 ## Deploy su Render
 
 1. Repository Git con `be/`, `fe/`, `render.yaml` nella radice.
-2. **New > Blueprint**, si sceglie la repo: nascono `salone-db`, `salone-be`, `salone-fe`.
+2. **New > Blueprint**, si sceglie la repo: nascono `salone-gleonardi-db`, `salone-gleonardi-be`, `salone-gleonardi-fe`.
    `JWT_SECRET` la genera Render.
 3. Dopo la prima build si impostano le variabili `sync: false`, senza `/` finale:
 
    | Servizio | Variabile | Valore |
    |---|---|---|
-   | `salone-be` | `ALLOWED_ORIGIN` | `https://salone-fe.onrender.com` |
-   | `salone-be` | `FRONTEND_URL` | `https://salone-fe.onrender.com` |
-   | `salone-be` | `ADMIN_PASSWORD` | password dell'amministratore |
-   | `salone-be` | `MAIL_USERNAME` | indirizzo Gmail |
-   | `salone-be` | `MAIL_PASSWORD` | password per le app di Gmail |
-   | `salone-fe` | `VITE_API_URL` | `https://salone-be.onrender.com` |
+   | `salone-gleonardi-be` | `ALLOWED_ORIGIN` | `https://salone-gleonardi-fe.onrender.com` |
+   | `salone-gleonardi-be` | `FRONTEND_URL` | `https://salone-gleonardi-fe.onrender.com` |
+   | `salone-gleonardi-be` | `ADMIN_PASSWORD` | password dell'amministratore |
+   | `salone-gleonardi-be` | `MAIL_USERNAME` | indirizzo Gmail |
+   | `salone-gleonardi-be` | `MAIL_PASSWORD` | password per le app di Gmail |
+   | `salone-gleonardi-fe` | `VITE_API_URL` | `https://salone-gleonardi-be.onrender.com` |
 
 4. **Manual Deploy** di entrambi (`VITE_API_URL` è letta in fase di build).
 

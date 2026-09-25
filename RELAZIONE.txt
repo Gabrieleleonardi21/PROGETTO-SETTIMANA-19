@@ -190,7 +190,7 @@ applicazione:
   riceve 401.
 
 Perche' il token e' nel localStorage e non in un cookie HttpOnly: su Render frontend e
-backend stanno su due domini diversi (salone-fe / salone-be.onrender.com) e un cookie
+backend stanno su due domini diversi (salone-gleonardi-fe / salone-gleonardi-be.onrender.com) e un cookie
 SameSite non verrebbe inviato. Il rischio del localStorage e' un XSS: per questo non c'e'
 HTML dinamico nell'app e il sito statico ha una Content-Security-Policy che permette script
 solo dallo stesso dominio.

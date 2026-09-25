@@ -2,7 +2,7 @@
 # Su Render: New > Blueprint > repository > Apply.
 
 databases:
-  - name: salone-db
+  - name: salone-gleonardi-db
     databaseName: salone
     user: salone
     plan: free
@@ -11,7 +11,7 @@ databases:
 services:
   # ---------- Backend: Spring Boot via Docker ----------
   - type: web
-    name: salone-be
+    name: salone-gleonardi-be
     runtime: docker
     plan: free
     region: frankfurt
@@ -27,9 +27,9 @@ services:
     envVars:
       - key: DATABASE_URL
         fromDatabase:
-          name: salone-db
+          name: salone-gleonardi-db
           property: connectionString
-      # Origine del FE per il CORS, es. https://salone-fe.onrender.com
+      # Origine del FE per il CORS, es. https://salone-gleonardi-fe.onrender.com
       - key: ALLOWED_ORIGIN
         sync: false
       # Indirizzo del FE per il link "disattiva avviso" nelle mail (senza / finale)
@@ -51,7 +51,7 @@ services:
 
   # ---------- Frontend: build Vite statica ----------
   - type: web
-    name: salone-fe
+    name: salone-gleonardi-fe
     runtime: static
     rootDir: fe
     buildCommand: npm ci && npm run build
@@ -61,7 +61,7 @@ services:
         - fe/**
         - render.yaml
     envVars:
-      # Indirizzo del BE, es. https://salone-be.onrender.com (senza / finale)
+      # Indirizzo del BE, es. https://salone-gleonardi-be.onrender.com (senza / finale)
       - key: VITE_API_URL
         sync: false
     # Header di sicurezza del sito statico. La CSP limita da dove partono script e fetch: e' la difesa
