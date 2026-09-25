@@ -7,6 +7,7 @@ import lombok.Setter;
 
 import java.math.BigDecimal;
 import org.hibernate.annotations.BatchSize;
+import org.hibernate.annotations.Formula;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -71,6 +72,11 @@ public class Auto {
     @Column(name = "url", nullable = false, length = 500)
     @BatchSize(size = 50)
     private List<String> immagini = new ArrayList<>();
+
+    // true se l'auto ha almeno una foto. Calcolato dal database a ogni lettura (nessuna colonna da tenere
+    // aggiornata): serve solo per mettere in cima al catalogo le auto con la copertina.
+    @Formula("(select count(*) > 0 from auto_immagini ai where ai.auto_id = id)")
+    private boolean conCopertina;
 
     // Crediti delle foto (licenza) e pagina da cui provengono, mostrati sotto la galleria
     @Column(length = 200)

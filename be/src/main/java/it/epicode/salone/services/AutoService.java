@@ -30,6 +30,9 @@ public class AutoService {
             "marca", "marca",
             "recenti", "creataIl");
     private static final Sort ORDINE_PREDEFINITO = Sort.by(Sort.Direction.DESC, "creataIl");
+    // Nel catalogo pubblico prima le auto con la copertina, poi le altre: dentro ogni gruppo vale l'ordine scelto.
+    // Non e' tra gli ORDINAMENTI ammessi: il client non lo puo' togliere ne' usare da solo.
+    private static final Sort PRIMA_CON_COPERTINA = Sort.by(Sort.Direction.DESC, "conCopertina");
 
     private final AutoRepository autoRepository;
     private final ApplicationEventPublisher eventi;
@@ -38,7 +41,7 @@ public class AutoService {
 
     @Transactional(readOnly = true)
     public PageResponse<AutoPubblicaResponse> catalogo(AutoSearchParams filtri, Pageable pageable) {
-        Sort sort = SearchUtils.traduciSort(pageable.getSort(), ORDINAMENTI, ORDINE_PREDEFINITO);
+        Sort sort = PRIMA_CON_COPERTINA.and(SearchUtils.traduciSort(pageable.getSort(), ORDINAMENTI, ORDINE_PREDEFINITO));
         Pageable pagina = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), sort);
         return PageResponse.of(autoRepository.findAll(AutoSpecifications.pubbliche(filtri), pagina)
                 .map(AutoPubblicaResponse::da));
