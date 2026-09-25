@@ -1,0 +1,78 @@
+spring:
+  application:
+    name: salone-auto
+
+  # In locale i segreti stanno in be/.env (formato CHIAVE=valore, fuori dalla repo).
+  # Su Render arrivano come variabili d'ambiente del servizio.
+  config:
+    import: optional:file:.env[.properties]
+
+  datasource:
+    # In locale valgono i valori dopo i due punti. Su Render DatabaseUrl legge
+    # DATABASE_URL e sovrascrive queste tre proprieta'.
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/salone_auto}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:admin}
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  # Gmail con password per le app. Nessun valore di ripiego: senza le due
+  # variabili l'applicazione non parte, e la password non entra mai nella repo.
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+          # Se Gmail non risponde il thread dell'avviso non resta appeso
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+
+  data:
+    web:
+      pageable:
+        # Un client non puo' chiedere tutto il catalogo in una volta
+        max-page-size: 50
+
+server:
+  # Render assegna la porta in PORT.
+  port: ${PORT:8080}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+app:
+  cors:
+    # In produzione: ALLOWED_ORIGIN=https://<fe>.onrender.com (piu' valori separati da virgola).
+    allowed-origins: ${ALLOWED_ORIGIN:http://localhost:5173,http://localhost:4173}
+  jwt:
+    # HS256: almeno 32 caratteri. Nessun default, senza JWT_SECRET l'app non parte.
+    secret: ${JWT_SECRET}
+    expiration-minutes: ${JWT_EXPIRATION_MINUTES:120}
+  admin:
+    # L'amministratore viene creato al primo avvio con queste credenziali.
+    email: ${ADMIN_EMAIL:admin@salone.it}
+    password: ${ADMIN_PASSWORD}
+  # Indirizzo del frontend, usato per il link "disattiva avviso" nella mail.
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}

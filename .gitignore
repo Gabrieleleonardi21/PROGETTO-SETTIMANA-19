@@ -1,0 +1,16 @@
+# Backend
+be/target/
+
+# Frontend
+fe/node_modules/
+fe/dist/
+fe/.env
+fe/.env.local
+
+# Editor
+.idea/
+.vscode/
+*.iml
+
+# Segreti locali del backend
+be/.env
